@@ -1,4 +1,4 @@
-import { makeWASocket, useMultiFileAuthState, DisconnectReason } from '@whiskeysockets/baileys';
+import { makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } from '@whiskeysockets/baileys';
 import pino from 'pino';
 import * as fs from 'fs';
 import qrcode from 'qrcode';
@@ -25,8 +25,11 @@ export const initWA = async () => {
 
   // eslint-disable-next-line react-hooks/rules-of-hooks
   const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
+  
+  const { version, isLatest } = await fetchLatestBaileysVersion();
 
   const sock = makeWASocket({
+      version,
       auth: state,
       printQRInTerminal: false,
       browser: ['SIP GAJI', 'Chrome', '1.0.0'],
