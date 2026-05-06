@@ -1,0 +1,6 @@
+{
+  "name": "Aplikasi Slip Gaji",
+  "description": "Aplikasi pengiriman Slip Gaji Karyawan via WhatsApp berbasis Excel",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}

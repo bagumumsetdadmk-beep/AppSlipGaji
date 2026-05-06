@@ -1,0 +1,22 @@
+export type EmployeeData = {
+  nomor: string;
+  nama: string;
+  noWa: string;
+  gaji: number;
+  bpd: number;
+  bpdKeDr?: string;
+  zakatProfesi: number;
+  koperasiMas: number;
+  koperasiKeDr?: string;
+  danaKorpri: number;
+  kesetiakawanan: number;
+  dwpIuranAnggota: number;
+  dwpArisan: number;
+  dwpTabSetda: number;
+  dwpTabBagUmum: number;
+  dwpKasUnsurPimpinan: number;
+  dwpGnota: number;
+  tabLebaran: number;
+  gnota: number;
+  pmi: number;
+};
