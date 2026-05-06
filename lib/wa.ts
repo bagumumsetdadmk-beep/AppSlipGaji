@@ -29,6 +29,7 @@ export const initWA = async () => {
   const sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
+      browser: ['SIP GAJI', 'Chrome', '1.0.0'],
       logger: pino({ level: 'silent' }),
   });
 
