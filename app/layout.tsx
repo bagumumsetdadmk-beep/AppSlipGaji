@@ -16,7 +16,7 @@ export const metadata = {
   title: 'WhatsApp SlipGaji - Kab. Demak',
   description: 'Aplikasi pengiriman slip gaji via WhatsApp - Bagian Umum Setda Demak',
   icons: {
-    icon: '/icon.svg',
+    icon: '/logo.png',
   },
 };
 

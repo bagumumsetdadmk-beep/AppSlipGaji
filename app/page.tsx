@@ -156,7 +156,7 @@ export default function Page() {
       <nav className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 px-4 md:px-8 py-4 flex flex-wrap justify-between items-center gap-4">
         <div className="flex items-center gap-4">
           <div className="relative w-12 h-12 flex-shrink-0 bg-white p-1 rounded-xl shadow-sm border border-slate-100 flex items-center justify-center">
-            <Image src="/logo.svg" alt="Logo Demak" width={36} height={36} className="object-contain" />
+            <Image src="/logo.png" alt="Logo Demak" width={36} height={36} className="object-contain" />
           </div>
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-blue-700 to-blue-500 bg-clip-text text-transparent">

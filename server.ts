@@ -18,7 +18,7 @@ app.prepare().then(() => {
   });
 
   server.post('/api/wa', async (req, res) => {
-    await initWA();
+    await initWA(true);
     res.json({ success: true, ...getWAStatus() });
   });
 
