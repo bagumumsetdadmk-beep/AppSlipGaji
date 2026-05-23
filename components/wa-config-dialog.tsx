@@ -104,10 +104,22 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
               <p className="text-sm text-slate-500 max-w-xs">
                 Buka WhatsApp di HP Anda, buka menu Perangkat Taut, dan scan QR Code ini.
               </p>
-              <button onClick={connectWA} disabled={loading} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors flex items-center">
-                 <QrCode className="h-4 w-4 mr-2" />
+              <button onClick={connectWA} disabled={loading || (status as any).isInitializing} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors flex items-center">
+                 {loading || (status as any).isInitializing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
                  Muat Ulang QR
               </button>
+            </div>
+          ) : (status as any).isInitializing ? (
+            <div className="flex flex-col items-center space-y-4 text-center">
+              <div className="h-16 w-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center animate-pulse">
+                <Loader2 className="h-8 w-8 animate-spin" />
+              </div>
+              <div>
+                <h3 className="font-semibold text-lg text-slate-900">Menyiapkan QR Code...</h3>
+                <p className="text-sm text-slate-500 max-w-xs mt-1">
+                  Sistem sedang menginisialisasi modul WhatsApp. Mohon tunggu sebentar.
+                </p>
+              </div>
             </div>
           ) : (
             <div className="flex flex-col items-center space-y-4 text-center">
@@ -120,8 +132,8 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
                   Klik tombol di bawah untuk menampilkan QR Code
                 </p>
               </div>
-              <button onClick={connectWA} disabled={loading} className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl hover:bg-slate-800 text-sm font-semibold transition-colors flex items-center">
-                {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
+              <button onClick={connectWA} disabled={loading || (status as any).isInitializing} className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl hover:bg-slate-800 text-sm font-semibold transition-colors flex items-center">
+                {loading || (status as any).isInitializing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
                 Tampilkan QR Code
               </button>
             </div>
