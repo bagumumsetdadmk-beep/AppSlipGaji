@@ -14,6 +14,11 @@ if (!globalThis.globalWAStatus) {
 }
 
 export const initWA = async (wait: boolean = false) => {
+  // Prevent initialization during build time
+  if (process.env.NEXT_PHASE === 'phase-production-build') {
+     return;
+  }
+  
   // If already connected, do nothing
   if (globalThis.globalWAStatus.isConnected && globalThis.globalWAClient) {
      return;
@@ -99,13 +104,14 @@ export const initWA = async (wait: boolean = false) => {
               console.log(`Connection closed. Reason: ${statusCode}, Reconnect: ${shouldReconnect}`);
 
               if (shouldReconnect) {
-                  // Only reconnect if we weren't just trying to connect
-                  if (!resolved) {
-                      globalThis.globalWAStatus.error = "Connection lost. Retrying...";
-                  }
                   safeResolve();
-                  // Avoid rapid loops: wait longer before retrying
-                  setTimeout(() => initWA(), 5000);
+                  // Avoid rapid loops: only re-init if really needed
+                  setTimeout(() => {
+                    if (!globalThis.globalWAStatus.isConnected && !globalThis.globalWAStatus.isInitializing) {
+                      console.log("Re-initializing after connection loss...");
+                      initWA();
+                    }
+                  }, 10000);
               } else {
                  console.log("WA Logged out correctly");
                  globalThis.globalWAStatus.qr = null;
