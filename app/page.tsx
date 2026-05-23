@@ -1,427 +1,348 @@
-'use client';
+"use client";
 
-import React, { useState, useRef, useEffect } from 'react';
-import { parseExcelToEmployees, downloadTemplate } from '@/lib/excel';
-import { EmployeeData } from '@/types/employee';
-import SlipPreview from '@/components/SlipPreview';
-import { generateWhatsAppLink, calculateSisaGaji } from '@/lib/format';
-import { UploadCloud, FileDown, MessageCircle, FileText, Search, AlertCircle, X, Users, QrCode, Send, Loader2 } from 'lucide-react';
-import { format } from 'date-fns';
-import { id } from 'date-fns/locale';
-import { WAConfigDialog } from '@/components/wa-config-dialog';
+import React, { useState } from "react";
+import Image from "next/image";
+import { EmployeeData } from "@/types/employee";
+import { parseExcelToEmployees, downloadTemplate } from "@/lib/excel";
+import { formatCurrency, calculateSisaGaji } from "@/lib/format";
+import { WAConfigDialog } from "@/components/wa-config-dialog";
+import { pdf } from "@react-pdf/renderer";
+import { SlipPDFDocument } from "@/components/SlipPDF";
+import QRCode from "qrcode";
+import SlipPreview from "@/components/SlipPreview";
+import { 
+  FileSpreadsheet, 
+  Settings, 
+  Send, 
+  CheckCircle2, 
+  AlertTriangle, 
+  Download, 
+  Upload,
+  RefreshCw,
+  Eye,
+  X
+} from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
+import { createRoot } from "react-dom/client";
 
-export default function Home() {
+const MONTHS = [
+  "Januari", "Februari", "Maret", "April", "Mei", "Juni", 
+  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+];
+
+export default function Page() {
   const [employees, setEmployees] = useState<EmployeeData[]>([]);
-  const [month, setMonth] = useState<string>(format(new Date(), 'MMMM', { locale: id }));
-  const [year, setYear] = useState<string>(format(new Date(), 'yyyy'));
+  const [selectedMonth, setSelectedMonth] = useState(MONTHS[new Date().getMonth()]);
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
+  
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
-  const [searchTerm, setSearchTerm] = useState('');
+  const [error, setError] = useState<string | null>(null);
   
-  const [selectedEmp, setSelectedEmp] = useState<EmployeeData | null>(null);
+  const [isWAOpen, setIsWAOpen] = useState(false);
   
-  // WA variables
-  const [waConfigOpen, setWaConfigOpen] = useState(false);
-  const [waStatus, setWaStatus] = useState({ isConnected: false });
-  const [empToRender, setEmpToRender] = useState<EmployeeData | null>(null);
-  const hiddenSlipRef = useRef<HTMLDivElement>(null);
-  const [sendingState, setSendingState] = useState<{ isSending: boolean, targets: EmployeeData[], currentIdx: number, success: number, fail: number }>({
-    isSending: false,
-    targets: [],
-    currentIdx: 0,
-    success: 0,
-    fail: 0
-  });
-
-  useEffect(() => {
-    fetch('/api/wa').then(r => r.json()).then(d => setWaStatus(d)).catch(() => {});
-  }, [waConfigOpen]);
+  const [sendLogs, setSendLogs] = useState<Array<{ name: string, status: 'success'|'error', error?: string }>>([]);
+  const [sending, setSending] = useState(false);
+  const [currentIdx, setCurrentIdx] = useState(-1);
+  const [nextDelay, setNextDelay] = useState(0);
+  const [previewEmp, setPreviewEmp] = useState<EmployeeData | null>(null);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setLoading(true);
-    setError('');
-    
+    setError(null);
     try {
       const data = await parseExcelToEmployees(file);
       setEmployees(data);
-      if (data.length === 0) {
-        setError('Data kosong atau format tidak sesuai. Silakan gunakan template.');
-      }
-    } catch (err) {
-      console.error(err);
-      setError('Gagal membaca file Excel. Pastikan menggunakan template yang disediakan.');
+      setSendLogs([]);
+    } catch (err: any) {
+      setError(err.message || "Gagal membaca file Excel. Pastikan formatnya sesuai.");
     } finally {
       setLoading(false);
-      e.target.value = '';
+      if (e.target) e.target.value = '';
     }
   };
 
-  const startMassSend = async () => {
-    const targets = employees.filter(e => e.noWa);
-    if(targets.length === 0) return alert("Tidak ada data dengan nomor WA yang valid.");
+  const handleSendAll = async () => {
+    if (!employees.length) return;
     
-    const st = await fetch('/api/wa').then(r => r.json());
-    if(!st.isConnected) {
-        alert("WhatsApp belum terhubung. Silahkan scan QR Code terlebih dahulu.");
-        setWaConfigOpen(true);
+    // Check WA status first
+    try {
+      const res = await fetch('/api/wa');
+      const waStatus = await res.json();
+      if (!waStatus.isConnected) {
+        setIsWAOpen(true);
         return;
+      }
+    } catch(e) {
+      alert("Gagal mengecek status WA. Pastikan server nyala.");
+      return;
     }
 
-    if (!confirm(`Anda akan mengirim ${targets.length} slip gaji via WhatsApp. Lanjutkan?`)) return;
+    setSending(true);
+    setSendLogs([]);
 
-    setSendingState({ isSending: true, targets, currentIdx: 0, success: 0, fail: 0 });
-  };
+    for (let i = 0; i < employees.length; i++) {
+      setCurrentIdx(i);
+      const emp = employees[i];
+      let status: 'success'|'error' = 'success';
+      let errorMsg = '';
 
-  const handleSingleSendApi = async (emp: EmployeeData) => {
-    const st = await fetch('/api/wa').then(r => r.json());
-    if(!st.isConnected) {
-        setWaConfigOpen(true);
-        return;
-    }
-    
-    setEmpToRender(emp);
-    
-    setTimeout(async () => {
+      if (!emp.noWa) {
+        status = 'error';
+        errorMsg = 'Nomor WA kosong';
+      } else {
         try {
-            const html2canvas = (await import('html2canvas')).default;
-            const canvas = await html2canvas(hiddenSlipRef.current!, { scale: 1.5, useCORS: true, logging: false });
-            const imageBase64 = canvas.toDataURL('image/jpeg');
-            
-            const res = await fetch('/api/wa/send', {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                  phone: emp.noWa,
-                  message: `Slip Gaji ${month} ${year}\n\nNama: ${emp.nama}\nNo: ${emp.nomor}\n\nPesan otomatis dari SIP GAJI.`,
-                  imageBase64
-              })
-            });
-            const data = await res.json();
-            if(!data.success) throw new Error(data.error);
-            alert("Pesan berhasil dikirim!");
-        } catch(e: any) {
-            alert("Gagal mengirim pesan: " + e.message);
-        } finally {
-            setEmpToRender(null);
+          // Generate PDF
+          const qrText = `Dokumen ini telah ditandatangani secara elektronik oleh:\nNama: WURYANTO, S.M\nNIP: 198206292008011017\nJabatan: Bendahara Gaji Setda Demak\nTahun: ${selectedYear}\nBulan: ${selectedMonth}`;
+          const qrDataUrl = await QRCode.toDataURL(qrText);
+          
+          const asPdf = pdf();
+          asPdf.updateContainer(<SlipPDFDocument employee={emp} month={selectedMonth} year={selectedYear} qrCodeDataUrl={qrDataUrl} />);
+          const blob = await asPdf.toBlob();
+
+          // Convert blob to base64
+          const reader = new FileReader();
+          reader.readAsDataURL(blob);
+          const pdfBase64 = await new Promise<string>((resolve) => {
+            reader.onloadend = () => resolve(reader.result as string);
+          });
+
+          // 4. Send via WA API
+          const textMsg = `Berikut adalah rincian gaji Anda untuk bulan *${selectedMonth} ${selectedYear}*\n\nTerima kasih.`;
+          
+          const sendRes = await fetch('/api/wa/send', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              phone: emp.noWa,
+              message: textMsg,
+              pdfBase64,
+              pdfFilename: `Slip_Gaji_${emp.nama.replace(/\s+/g, '_')}_${selectedMonth}_${selectedYear}.pdf`
+            })
+          });
+
+          const sendData = await sendRes.json();
+          if (!sendData.success) {
+            status = 'error';
+            errorMsg = sendData.error || 'Server error';
+          }
+
+        } catch (err: any) {
+           status = 'error';
+           errorMsg = err.message || 'Gagal memproses';
         }
-    }, 500);
-  };
+      }
 
-  useEffect(() => {
-    if (sendingState.isSending && sendingState.currentIdx < sendingState.targets.length) {
-        const emp = sendingState.targets[sendingState.currentIdx];
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setEmpToRender(emp);
-        
-        const timer = setTimeout(async () => {
-            try {
-                const html2canvas = (await import('html2canvas')).default;
-                const canvas = await html2canvas(hiddenSlipRef.current!, { scale: 1.5, useCORS: true, logging: false });
-                const imageBase64 = canvas.toDataURL('image/jpeg');
-                
-                const res = await fetch('/api/wa/send', {
-                   method: 'POST',
-                   headers: {'Content-Type': 'application/json'},
-                   body: JSON.stringify({
-                       phone: emp.noWa,
-                       message: `Slip Gaji ${month} ${year}\n\nNama: ${emp.nama}\nNo: ${emp.nomor}\n\nPesan otomatis dari SIP GAJI.`,
-                       imageBase64
-                   })
-                });
-                const data = await res.json();
-                if(!data.success) throw new Error(data.error);
-                
-                setSendingState(prev => ({ ...prev, success: prev.success + 1, currentIdx: prev.currentIdx + 1 }));
-            } catch(e) {
-                console.error(e);
-                setSendingState(prev => ({ ...prev, fail: prev.fail + 1, currentIdx: prev.currentIdx + 1 }));
-            }
-        }, 800); 
-        return () => clearTimeout(timer);
-    } else if (sendingState.isSending && sendingState.currentIdx >= sendingState.targets.length) {
-        alert(`Pengiriman selesai! Berhasil: ${sendingState.success}, Gagal: ${sendingState.fail}`);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setSendingState(prev => ({ ...prev, isSending: false, currentIdx: 0 }));
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        setEmpToRender(null);
+      setSendLogs(curr => [...curr, { name: emp.nama, status, error: errorMsg }]);
+      
+      // Anti-Ban Security Delay (5-10 seconds randomized)
+      if (i < employees.length - 1) {
+        const delay = Math.floor(Math.random() * (10000 - 5000 + 1)) + 5000;
+        setNextDelay(delay / 1000);
+        await new Promise(r => setTimeout(r, delay));
+      }
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sendingState.currentIdx, sendingState.isSending, sendingState.targets, month, year]);
 
-  const filtered = employees.filter(e => 
-    e.nama.toLowerCase().includes(searchTerm.toLowerCase()) || 
-    e.nomor.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    e.noWa.includes(searchTerm)
-  );
+    setSending(false);
+    setCurrentIdx(-1);
+    setNextDelay(0);
+  };
 
   return (
-    <div className="min-h-screen bg-[#F1F5F9] text-slate-800 font-sans p-4 sm:p-6 lg:p-8">
-      
-      <div className="max-w-7xl mx-auto space-y-4 flex flex-col">
-        {/* Header */}
-        <header className="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-4 rounded-2xl border border-slate-200 shadow-sm gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-emerald-500 rounded-xl flex items-center justify-center flex-shrink-0 shadow-lg shadow-emerald-500/20">
-              <FileText className="w-6 h-6 text-white" />
-            </div>
-            <div>
-              <h1 className="text-xl font-bold text-slate-900 tracking-tight">Manajemen Slip Gaji</h1>
-              <p className="text-xs text-slate-500 font-medium">Bagian Umum Setda Kab. Demak</p>
-            </div>
+    <main className="min-h-screen bg-slate-50 text-slate-900 pb-20">
+      {/* Header */}
+      <nav className="bg-white/90 backdrop-blur-md border-b border-slate-200/80 sticky top-0 z-40 px-4 md:px-8 py-4 flex flex-wrap justify-between items-center gap-4">
+        <div className="flex items-center gap-4">
+          <div className="relative w-12 h-12 flex-shrink-0 bg-white p-1 rounded-xl shadow-sm border border-slate-100 flex items-center justify-center">
+            <Image src="/logo.png" alt="Logo Demak" width={36} height={36} className="object-contain" />
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
-            <button 
-              onClick={() => setWaConfigOpen(true)}
-              className={`inline-flex items-center gap-2 px-4 py-2 border-2 ${waStatus.isConnected ? 'border-green-200 text-green-600 bg-green-50' : 'border-slate-100 bg-white text-slate-600'} hover:border-green-300 hover:text-green-700 rounded-xl text-xs font-bold transition-colors`}
-            >
-              <QrCode className="w-4 h-4" />
-              {waStatus.isConnected ? 'WA Terhubung' : 'Koneksi WA'}
-            </button>
-            <button 
-              onClick={downloadTemplate}
-              className="inline-flex items-center gap-2 px-4 py-2 border-2 border-slate-100 bg-white text-slate-600 hover:border-emerald-200 hover:text-emerald-600 rounded-xl text-xs font-bold transition-colors"
-            >
-              <FileDown className="w-4 h-4" />
-              Download Template
-            </button>
+          <div>
+            <h1 className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-blue-700 to-blue-500 bg-clip-text text-transparent">
+              WhatsApp SlipGaji
+            </h1>
+            <p className="text-sm text-slate-500 font-medium">Bagian Umum Setda Demak</p>
           </div>
-        </header>
+        </div>
+        
+        <div className="flex gap-3">
+           <button onClick={downloadTemplate} className="flex items-center gap-2 px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-xl text-sm font-semibold transition-all hover:shadow-sm">
+              <Download className="w-4 h-4" />
+              <span className="hidden md:inline">Template Excel</span>
+           </button>
+           <button onClick={() => setIsWAOpen(true)} className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-slate-800 to-slate-900 hover:from-slate-900 hover:to-black text-white rounded-xl text-sm font-semibold transition-all shadow-md hover:shadow-lg">
+              <Settings className="w-4 h-4" />
+              <span>Koneksi WA</span>
+           </button>
+        </div>
+      </nav>
 
-        {sendingState.isSending && (
-            <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <Loader2 className="w-5 h-5 text-blue-500 animate-spin" />
-                    <div>
-                        <p className="text-sm font-bold text-blue-900">Mengirim Slip Gaji ({sendingState.currentIdx} / {sendingState.targets.length})</p>
-                        <p className="text-xs text-blue-700">Berhasil: {sendingState.success} | Gagal: {sendingState.fail}</p>
+      <div className="max-w-5xl mx-auto px-4 mt-8 space-y-6">
+        
+        {/* Upload Card */}
+        <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-200/60 relative overflow-hidden">
+           <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/5 rounded-full blur-3xl -mr-20 -mt-20 pointer-events-none" />
+           <div className="flex flex-wrap items-end justify-between gap-6 mb-8 relative z-10">
+              <div className="space-y-1.5">
+                 <h2 className="text-2xl font-bold flex items-center gap-2.5 text-slate-800">
+                    <div className="p-2.5 bg-blue-100 text-blue-600 rounded-xl">
+                      <FileSpreadsheet className="w-6 h-6" />
                     </div>
-                </div>
-            </div>
-        )}
-
-        {/* Top Controls Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 flex-1">
-          
-          {/* Form Settings */}
-          <section className="lg:col-span-4 flex flex-col gap-4">
-            <div className="bg-white rounded-3xl border border-slate-200 p-6 flex flex-col gap-5 shadow-sm">
-              <h2 className="font-bold text-sm text-slate-500 uppercase tracking-widest">Periode Gaji</h2>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Bulan</label>
-                  <input 
-                    type="text" 
-                    value={month} 
-                    onChange={(e) => setMonth(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-slate-300 focus:border-emerald-500 focus:bg-white focus:outline-none transition-colors"
-                    placeholder="Misal: MEI"
-                  />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Tahun</label>
-                  <input 
-                    type="text" 
-                    value={year} 
-                    onChange={(e) => setYear(e.target.value)}
-                    className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 hover:border-slate-300 focus:border-emerald-500 focus:bg-white focus:outline-none transition-colors"
-                  />
-                </div>
+                    Data Pegawai & Gaji
+                 </h2>
+                 <p className="text-sm text-slate-500 font-medium">Unggah file Excel sesuai format template untuk mulai memproses.</p>
               </div>
-            </div>
-
-            <div className="bg-white rounded-3xl border-2 border-dashed border-slate-300 p-6 sm:p-8 flex flex-col items-center justify-center gap-4 hover:border-emerald-400 transition-colors bg-gradient-to-br from-white to-slate-50 text-center relative overflow-hidden group min-h-[200px]">
-              <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-                {loading ? (
-                  <div className="w-8 h-8 border-4 border-emerald-600 border-t-transparent rounded-full animate-spin" />
-                ) : (
-                  <UploadCloud className="w-8 h-8 text-emerald-600" />
-                )}
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-slate-900 mb-1">Upload Data Gaji</h2>
-                <p className="text-xs text-slate-500 max-w-[200px] mx-auto">
-                  Seret file Excel (.xlsx) atau <span className="text-emerald-600 font-semibold">klik untuk telusuri</span>
-                </p>
-              </div>
-              <input type="file" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept=".xlsx, .xls" onChange={handleFileUpload} />
-            </div>
-
-            {error && (
-              <div className="p-4 bg-red-50 text-red-700 text-xs font-semibold rounded-2xl flex items-start gap-3 border border-red-100">
-                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                <p>{error}</p>
-              </div>
-            )}
-          </section>
-
-          {/* List Area */}
-          <section className="lg:col-span-8 bg-white rounded-3xl border border-slate-200 flex flex-col overflow-hidden h-[36rem] shadow-sm">
-            <div className="p-6 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white z-10 relative">
-              <div className="flex items-center gap-3">
-                <h3 className="font-bold text-slate-800">Daftar Pegawai</h3>
-                {employees.length > 0 && (
-                  <span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider">{employees.length} Total</span>
-                )}
-              </div>
-              <div className="flex items-center gap-3 flex-wrap sm:flex-nowrap w-full sm:w-auto">
-                <div className="relative w-full sm:w-64">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-                  <input 
-                    type="text" 
-                    placeholder="Cari nama / WA..." 
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-700 hover:border-slate-300 focus:border-emerald-500 focus:bg-white focus:outline-none transition-colors"
-                  />
-                </div>
-                {employees.length > 0 && (
-                  <button
-                    onClick={startMassSend}
-                    disabled={sendingState.isSending}
-                    className="w-full sm:w-auto px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-colors flex items-center justify-center gap-2 shadow-sm"
-                  >
-                    <Send className="w-4 h-4" />
-                    Kirim Semua
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <div className="flex-1 overflow-auto bg-white custom-scrollbar px-6 relative">
-              {employees.length === 0 ? (
-                <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400">
-                  <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
-                     <Users className="w-8 h-8 text-slate-300" />
+           </div>
+           
+           <div className="grid md:grid-cols-3 gap-6 relative z-10">
+             <div className="md:col-span-2">
+               <label className="border-2 border-dashed border-slate-300 hover:border-blue-400 hover:bg-blue-50/50 transition-all rounded-2xl p-10 flex flex-col items-center justify-center cursor-pointer group">
+                  <div className="bg-blue-100 text-blue-600 p-4 rounded-full mb-4 group-hover:scale-110 transition-transform shadow-sm">
+                     {loading ? <RefreshCw className="w-6 h-6 animate-spin" /> : <Upload className="w-6 h-6" />}
                   </div>
-                  <p className="text-sm font-bold text-slate-500">Belum ada data pegawai.</p>
-                  <p className="text-xs mt-1 text-slate-400">Upload file Excel untuk memuat data.</p>
+                  <span className="font-bold text-slate-700 text-lg">Pilih File Excel</span>
+                  <span className="text-sm text-slate-400 mt-1">Format didukung: .xlsx, .xls</span>
+                  <input type="file" accept=".xlsx,.xls" className="hidden" onChange={handleFileUpload} disabled={loading || sending} />
+               </label>
+               {error && (
+                 <div className="mt-4 p-4 bg-red-50 text-red-700 text-sm font-medium rounded-xl flex items-start gap-3 ring-1 ring-inset ring-red-100">
+                   <AlertTriangle className="w-5 h-5 shrink-0" />
+                   <p>{error}</p>
+                 </div>
+               )}
+             </div>
+
+             <div className="space-y-4">
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-2">Periode Bulan</label>
+                   <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} disabled={sending} className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors shadow-sm">
+                      {MONTHS.map(m => <option key={m} value={m}>{m}</option>)}
+                   </select>
                 </div>
-              ) : (
-                <table className="w-full text-left">
-                  <thead className="text-[10px] text-slate-400 uppercase font-bold border-b border-slate-100 sticky top-0 bg-white/95 backdrop-blur-sm z-10">
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-2">Periode Tahun</label>
+                   <input
+                     type="number"
+                     value={selectedYear}
+                     onChange={e => setSelectedYear(e.target.value)}
+                     disabled={sending}
+                     placeholder="Contoh: 2024"
+                     className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-colors shadow-sm"
+                   />
+                </div>
+             </div>
+           </div>
+        </div>
+
+        {/* Data & Logs */}
+        {employees.length > 0 && (
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200/60 overflow-hidden">
+             <div className="p-6 md:p-8 border-b border-slate-100 flex flex-wrap justify-between items-center gap-4 bg-slate-50/50">
+                <div>
+                   <h3 className="font-extrabold text-xl text-slate-800">Daftar Penerima Slip Gaji ({employees.length})</h3>
+                   <p className="text-sm text-slate-500 font-medium mt-1">Pastikan WhatsApp tujuan valid sebelum memproses pengiriman.</p>
+                </div>
+                <button 
+                  onClick={handleSendAll} 
+                  disabled={sending}
+                  className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-700 hover:to-blue-600 active:scale-95 text-white px-8 py-3 rounded-xl font-bold transition-all shadow-md shadow-blue-500/25 disabled:opacity-50 disabled:cursor-not-allowed disabled:active:scale-100"
+                >
+                  {sending ? <RefreshCw className="w-5 h-5 animate-spin" /> : <Send className="w-5 h-5" />}
+                  {sending ? 'Memproses...' : 'Kirim Semua via WA'}
+                </button>
+             </div>
+             <div className="overflow-x-auto">
+                <table className="w-full text-sm text-left">
+                  <thead className="bg-white/50 text-slate-500 text-xs uppercase font-extrabold tracking-wider border-b border-slate-100">
                     <tr>
-                      <th className="py-3 px-2">Nama Pegawai & No</th>
-                      <th className="py-3 px-2">WhatsApp</th>
-                      <th className="py-3 px-2 text-right">Sisa Gaji</th>
-                      <th className="py-3 px-2 text-right">Aksi</th>
+                      <th className="px-6 py-5">No</th>
+                      <th className="px-6 py-5">Nama Pegawai</th>
+                      <th className="px-6 py-5">No. WhatsApp</th>
+                      <th className="px-6 py-5 text-right w-[180px]">Sisa Diterima</th>
+                      <th className="px-6 py-5 w-[160px]">Status Kirim</th>
+                      <th className="px-6 py-5 text-center w-[120px]">Aksi</th>
                     </tr>
                   </thead>
-                  <tbody className="text-xs">
-                    {filtered.map((emp, i) => (
-                      <tr key={i} className="border-b border-slate-50 hover:bg-slate-50/80 transition-colors group">
-                        <td className="py-4 px-2">
-                          <p className="font-bold text-slate-800">{emp.nama}</p>
-                          <p className="text-[10px] text-slate-500 mt-0.5 font-medium">#{emp.nomor}</p>
-                        </td>
-                        <td className="py-4 px-2">
-                          {emp.noWa ? (
-                            <span className="inline-flex items-center gap-1 text-slate-600 font-medium bg-slate-100 px-2 py-1 rounded-md text-[10px]">
-                              {emp.noWa}
-                            </span>
-                          ) : (
-                            <span className="text-red-400 text-[10px] font-bold">Kosong</span>
-                          )}
-                        </td>
-                        <td className="py-4 px-2 text-right">
-                          <span className="font-mono font-bold text-slate-700">Rp {calculateSisaGaji(emp).toLocaleString('id-ID')}</span>
-                        </td>
-                        <td className="py-4 px-2">
-                          <div className="flex items-center justify-end gap-2 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => setSelectedEmp(emp)}
-                              className="px-3 py-2 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-[10px] font-bold transition-colors"
-                            >
-                              Preview
-                            </button>
-                            <button
-                              onClick={() => handleSingleSendApi(emp)}
-                              disabled={!emp.noWa}
-                              className="px-3 py-2 bg-[#25D366]/10 text-[#25D366] hover:bg-[#25D366]/20 disabled:opacity-50 disabled:cursor-not-allowed rounded-xl text-[10px] font-bold transition-colors flex items-center gap-1.5"
-                            >
-                              <MessageCircle className="w-3 h-3" />
-                              Kirim
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    ))}
-                    {filtered.length === 0 && (
-                      <tr>
-                        <td colSpan={4} className="py-12 text-center text-slate-500 font-medium text-xs">
-                          Pencarian &quot;{searchTerm}&quot; tidak ditemukan
-                        </td>
-                      </tr>
-                    )}
+                  <tbody className="divide-y divide-slate-100">
+                     {employees.map((emp, i) => {
+                       const log = sendLogs.find(l => l.name === emp.nama);
+                       return (
+                         <tr key={i} className="hover:bg-blue-50/40 transition-colors group">
+                           <td className="px-6 py-4 text-slate-500 font-medium">{i + 1}</td>
+                           <td className="px-6 py-4 font-bold text-slate-800">{emp.nama}</td>
+                           <td className="px-6 py-4 font-mono text-slate-600">{emp.noWa || '-'}</td>
+                           <td className="px-6 py-4 font-bold text-slate-800 text-right">{formatCurrency(calculateSisaGaji(emp))}</td>
+                           <td className="px-6 py-4">
+                              {!log ? (
+                                <span className="inline-flex py-1 px-3 rounded-full bg-slate-100 text-slate-600 text-xs font-bold ring-1 ring-inset ring-slate-200">
+                                  Menunggu
+                                </span>
+                              ) : log.status === 'success' ? (
+                                <span className="inline-flex items-center gap-1.5 py-1 px-3 rounded-full bg-emerald-50 text-emerald-700 text-xs font-bold ring-1 ring-inset ring-emerald-200">
+                                  <CheckCircle2 className="w-3.5 h-3.5" /> Berhasil
+                                </span>
+                              ) : (
+                                <span className="inline-flex flex-col gap-1 items-start">
+                                  <span className="inline-flex py-1 px-3 rounded-full bg-rose-50 text-rose-700 text-xs font-bold ring-1 ring-inset ring-rose-200">Gagal</span>
+                                  <span className="text-[11px] text-rose-600 font-medium max-w-[150px] leading-tight flex-wrap">{log.error}</span>
+                                </span>
+                              )}
+                           </td>
+                           <td className="px-6 py-4 text-center">
+                              <button 
+                                onClick={() => setPreviewEmp(emp)}
+                                className="inline-flex items-center gap-1.5 text-sm font-bold text-blue-600 hover:text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-xl transition-colors opacity-80 group-hover:opacity-100"
+                              >
+                                 <Eye className="w-4 h-4" /> Preview
+                              </button>
+                           </td>
+                         </tr>
+                       )
+                     })}
                   </tbody>
                 </table>
-              )}
-            </div>
-          </section>
-        </div>
+             </div>
+          </div>
+        )}
       </div>
 
-      {/* Preview Modal */}
-      {selectedEmp && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 sm:p-6 overflow-hidden">
-          <div className="bg-slate-900 rounded-[2rem] shadow-2xl w-full max-w-2xl max-h-full flex flex-col animate-in fade-in zoom-in-95 duration-200 relative p-4 sm:p-6">
-            
-            <div className="flex justify-between items-center mb-6 px-2">
-               <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-2">
-                 <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-                 Preview Live
-               </span>
-               <button 
-                onClick={() => setSelectedEmp(null)}
-                className="text-white/40 hover:text-white transition-colors bg-white/10 hover:bg-white/20 p-2 rounded-full"
+      <WAConfigDialog open={isWAOpen} onOpenChange={setIsWAOpen} />
+      
+      {/* Preview Dialog */}
+      <AnimatePresence>
+         {previewEmp && (
+           <motion.div 
+             initial={{ opacity: 0 }}
+             animate={{ opacity: 1 }}
+             exit={{ opacity: 0 }}
+             className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm" 
+             onClick={() => setPreviewEmp(null)}
+           >
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                className="bg-white p-6 rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col border border-slate-200/50" 
+                onClick={e => e.stopPropagation()}
               >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-            
-            <div className="flex-1 bg-white rounded-2xl overflow-y-auto custom-scrollbar shadow-inner relative flex flex-col">
-               <div className="p-6 pb-20">
-                 <SlipPreview employee={selectedEmp} month={month} year={year} />
-               </div>
-
-               {/* Absolute bottom actions bar */}
-               <div className="absolute bottom-0 left-0 right-0 p-4 bg-gradient-to-t from-white via-white to-transparent flex justify-end gap-3 pointer-events-none">
-                 <div className="pointer-events-auto flex gap-3">
-                  <button 
-                    onClick={() => setSelectedEmp(null)}
-                    className="px-5 py-2.5 bg-slate-100 text-slate-600 hover:bg-slate-200 rounded-xl text-xs font-bold transition-colors shadow-sm"
-                  >
-                    Tutup
-                  </button>
-                  <button 
-                    onClick={() => handleSingleSendApi(selectedEmp)}
-                    disabled={!selectedEmp.noWa}
-                    className="px-5 py-2.5 bg-[#25D366] hover:bg-[#20BE5A] disabled:bg-slate-300 disabled:text-slate-500 text-white rounded-xl text-xs font-bold transition-colors flex items-center gap-2 shadow-lg shadow-[#25D366]/30"
-                  >
-                    <MessageCircle className="w-4 h-4" />
-                    Kirim via WhatsApp
-                  </button>
+                 <div className="flex justify-between items-center mb-5 shrink-0 px-2 mt-2">
+                    <h3 className="font-extrabold text-xl text-slate-800">Preview Slip Gaji <span className="text-blue-600">- {previewEmp.nama}</span></h3>
+                    <button onClick={() => setPreviewEmp(null)} className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-full transition-colors">
+                       <X className="w-6 h-6" />
+                    </button>
                  </div>
-               </div>
-            </div>
+                 <div className="overflow-y-auto overflow-x-auto bg-slate-50 border border-slate-100 flex-1 rounded-2xl shadow-inner">
+                    <div className="min-w-[600px] p-8">
+                       <SlipPreview employee={previewEmp} month={selectedMonth} year={selectedYear} />
+                    </div>
+                 </div>
+              </motion.div>
+           </motion.div>
+         )}
+      </AnimatePresence>
 
-          </div>
-        </div>
-      )}
-
-      {/* Hidden Div for rendering the Slip for html2canvas */}
-      {empToRender && (
-        <div style={{ position: 'fixed', top: '-9999px', left: '-9999px', zIndex: -100 }}>
-          <div ref={hiddenSlipRef} style={{ width: '800px', backgroundColor: '#fff', padding: '16px' }}>
-            <SlipPreview employee={empToRender} month={month} year={year} />
-          </div>
-        </div>
-      )}
-
-      <WAConfigDialog open={waConfigOpen} onOpenChange={setWaConfigOpen} />
-
-    </div>
+    </main>
   );
 }
+

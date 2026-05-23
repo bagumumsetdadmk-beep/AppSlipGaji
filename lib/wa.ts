@@ -19,6 +19,14 @@ export const initWA = async () => {
      return;
   }
 
+  // Clear existing client if broken
+  if (globalThis.globalWAClient) {
+      try {
+          await globalThis.globalWAClient.end(undefined);
+      } catch (e) {}
+      globalThis.globalWAClient = null;
+  }
+
   if (!fs.existsSync(AUTH_DIR)) {
       fs.mkdirSync(AUTH_DIR, { recursive: true });
   }
@@ -45,7 +53,8 @@ export const initWA = async () => {
 
       if (qr) {
          try {
-             globalThis.globalWAStatus.qr = await qrcode.toDataURL(qr);
+             console.log("QR update received");
+             globalThis.globalWAStatus.qr = qr;
          } catch (e) {
              console.error("QR generating error", e);
          }

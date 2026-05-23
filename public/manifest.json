@@ -1,0 +1,16 @@
+{
+  "name": "Slip Gaji App",
+  "short_name": "Slip Gaji",
+  "description": "Aplikasi manajemen slip gaji",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#10b981",
+  "icons": [
+    {
+      "src": "https://upload.wikimedia.org/wikipedia/commons/thumb/c/c5/Pancasila_Logo.svg/512px-Pancasila_Logo.svg.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

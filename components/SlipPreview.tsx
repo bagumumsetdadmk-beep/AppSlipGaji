@@ -1,6 +1,7 @@
 import React from 'react';
 import { EmployeeData } from '@/types/employee';
 import { calculateTotalPotongan, calculateSisaGaji, formatCurrency } from '@/lib/format';
+import QRCode from 'react-qr-code';
 
 type Props = {
   employee: EmployeeData;
@@ -68,8 +69,20 @@ export default function SlipPreview({ employee: emp, month, year }: Props) {
       </div>
 
       <div className="flex justify-end text-center mt-8">
-        <div className="text-slate-600">
-          <p className="mb-14 text-xs font-medium">Bendahara Gaji</p>
+        <div className="text-slate-600 flex flex-col items-center">
+          <p className="mb-4 text-xs font-medium">Bendahara Gaji</p>
+          <div className="mb-4 bg-white p-1 rounded-lg shadow-sm border border-slate-100">
+            <QRCode 
+              value={`Dokumen ini telah ditandatangani secara elektronik oleh:
+Nama: WURYANTO, S.M
+NIP: 198206292008011017
+Jabatan: Bendahara Gaji Setda Demak
+Tahun: ${year}
+Bulan: ${month}`} 
+              size={64} 
+              level="M" 
+            />
+          </div>
           <p className="font-black underline underline-offset-4 decoration-2 decoration-slate-300 text-slate-800">WURYANTO, S.M</p>
           <p className="text-[10px] mt-1 font-bold text-slate-400">NIP 198206292008011017</p>
         </div>

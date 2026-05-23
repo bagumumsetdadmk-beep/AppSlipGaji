@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "next build",
+    "build": "cross-env NODE_ENV=production next build",
     "start": "NODE_ENV=production tsx server.ts",
     "lint": "eslint .",
     "clean": "next clean"
@@ -12,12 +12,15 @@
   "dependencies": {
     "@google/genai": "^1.17.0",
     "@hookform/resolvers": "^5.2.1",
+    "@react-pdf/renderer": "^4.5.1",
     "@whiskeysockets/baileys": "^7.0.0-rc.9",
     "autoprefixer": "^10.4.21",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cross-env": "^10.1.0",
     "date-fns": "^4.1.0",
     "express": "^5.2.1",
+    "html-to-image": "^1.11.13",
     "html2canvas": "^1.4.1",
     "lucide-react": "^0.553.0",
     "motion": "^12.23.24",
@@ -27,6 +30,7 @@
     "qrcode": "^1.5.4",
     "react": "^19.2.1",
     "react-dom": "^19.2.1",
+    "react-qr-code": "^2.0.21",
     "tailwind-merge": "^3.3.1",
     "tsx": "^4.21.0",
     "xlsx": "^0.18.5"

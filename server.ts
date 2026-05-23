@@ -29,7 +29,7 @@ app.prepare().then(() => {
 
   server.post('/api/wa/send', async (req, res) => {
     try {
-      const { phone, message, imageBase64 } = req.body;
+      const { phone, message, imageBase64, pdfBase64, pdfFilename } = req.body;
       if (!phone) return res.status(400).json({ success: false, error: 'Nomor WhatsApp diperlukan' });
 
       const status = getWAStatus();
@@ -44,7 +44,16 @@ app.prepare().then(() => {
       if (jid.startsWith('0')) jid = '62' + jid.slice(1);
       if (!jid.endsWith('@s.whatsapp.net')) jid += '@s.whatsapp.net';
 
-      if (imageBase64) {
+      if (pdfBase64) {
+        const base64Data = pdfBase64.replace(/^data:application\/pdf;base64,/, "");
+        const buffer = Buffer.from(base64Data, 'base64');
+        await sock.sendMessage(jid, { 
+          document: buffer, 
+          mimetype: 'application/pdf', 
+          fileName: pdfFilename || 'Slip_Gaji.pdf', 
+          caption: message || '' 
+        });
+      } else if (imageBase64) {
         const base64Data = imageBase64.replace(/^data:image\/\w+;base64,/, "");
         const buffer = Buffer.from(base64Data, 'base64');
         await sock.sendMessage(jid, { image: buffer, caption: message || '' });

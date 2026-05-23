@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Loader2, QrCode, LogOut, CheckCircle2, X } from "lucide-react"
+import QRCode from "react-qr-code"
 
 interface WAConfigDialogProps {
   open: boolean
@@ -98,8 +99,7 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
           ) : status.qr ? (
             <div className="flex flex-col items-center space-y-4 text-center">
               <div className="p-2 border rounded-xl bg-white shadow-sm">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={status.qr} alt="QR Code WhatsApp" className="w-56 h-56" />
+                <QRCode value={status.qr} size={224} />
               </div>
               <p className="text-sm text-slate-500 max-w-xs">
                 Buka WhatsApp di HP Anda, buka menu Perangkat Taut, dan scan QR Code ini.
