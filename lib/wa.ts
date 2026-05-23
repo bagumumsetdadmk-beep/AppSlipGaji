@@ -6,39 +6,44 @@ const AUTH_DIR = '/tmp/wa-auth';
 
 declare global {
   var globalWAClient: ReturnType<typeof makeWASocket> | null;
-  var globalWAStatus: { isConnected: boolean, qr: string | null, isInitializing?: boolean };
+  var globalWAStatus: { isConnected: boolean, qr: string | null, isInitializing?: boolean, error?: string | null };
 }
 
 if (!globalThis.globalWAStatus) {
-    globalThis.globalWAStatus = { isConnected: false, qr: null, isInitializing: false };
+    globalThis.globalWAStatus = { isConnected: false, qr: null, isInitializing: false, error: null };
 }
 
 export const initWA = async (wait: boolean = false) => {
+  // If already connected, do nothing
+  if (globalThis.globalWAStatus.isConnected && globalThis.globalWAClient) {
+     return;
+  }
+
+  // If already initializing, wait if requested
   if (globalThis.globalWAStatus.isInitializing) {
     if (wait) {
-      // Wait for initialization to finish or QR to appear
       let attempts = 0;
-      while (globalThis.globalWAStatus.isInitializing && !globalThis.globalWAStatus.qr && attempts < 20) {
-        await new Promise(r => setTimeout(r, 500));
+      while (globalThis.globalWAStatus.isInitializing && !globalThis.globalWAStatus.qr && attempts < 30) {
+        await new Promise(r => setTimeout(r, 1000));
         attempts++;
       }
     }
     return;
   }
 
-  if (globalThis.globalWAStatus.isConnected && globalThis.globalWAClient) {
-     return;
-  }
-
   globalThis.globalWAStatus.isInitializing = true;
   globalThis.globalWAStatus.qr = null;
+  globalThis.globalWAStatus.error = null;
   console.log("Initializing WhatsApp Client...");
 
-  // Clear existing client if broken
+  // Ensure old client is closed
   if (globalThis.globalWAClient) {
       try {
+          globalThis.globalWAClient.ev.removeAllListeners('connection.update');
           await globalThis.globalWAClient.end(undefined);
-      } catch (e) {}
+      } catch (e) {
+          console.error("Error closing old client:", e);
+      }
       globalThis.globalWAClient = null;
   }
 
@@ -56,7 +61,6 @@ export const initWA = async (wait: boolean = false) => {
     };
 
     try {
-      // eslint-disable-next-line react-hooks/rules-of-hooks
       const { state, saveCreds } = await useMultiFileAuthState(AUTH_DIR);
       const { version } = await fetchLatestBaileysVersion();
 
@@ -64,11 +68,11 @@ export const initWA = async (wait: boolean = false) => {
           version,
           auth: state,
           printQRInTerminal: false,
-          browser: ['WhatsApp SlipGaji', 'Chrome', '1.0.0'],
+          browser: ['WhatsApp SlipGaji', 'Chrome', '114.0.0'],
           logger: pino({ level: 'silent' }),
           connectTimeoutMs: 60000,
           defaultQueryTimeoutMs: 0,
-          keepAliveIntervalMs: 10000,
+          retryRequestDelayMs: 5000,
       });
 
       globalThis.globalWAClient = sock;
@@ -87,20 +91,24 @@ export const initWA = async (wait: boolean = false) => {
 
           if (connection === 'close') {
               globalThis.globalWAStatus.isConnected = false;
+              globalThis.globalWAStatus.isInitializing = false;
               
-              const errorOutput = (lastDisconnect?.error as any)?.output;
-              const statusCode = errorOutput?.statusCode || (lastDisconnect?.error as any)?.payload?.statusCode;
+              const statusCode = (lastDisconnect?.error as any)?.output?.statusCode || (lastDisconnect?.error as any)?.payload?.statusCode;
               const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
               
+              console.log(`Connection closed. Reason: ${statusCode}, Reconnect: ${shouldReconnect}`);
+
               if (shouldReconnect) {
-                  console.log("WA Connection closed, reconnecting...");
-                  globalThis.globalWAStatus.isInitializing = false;
+                  // Only reconnect if we weren't just trying to connect
+                  if (!resolved) {
+                      globalThis.globalWAStatus.error = "Connection lost. Retrying...";
+                  }
                   safeResolve();
-                  setTimeout(() => initWA(), 3000);
+                  // Avoid rapid loops: wait longer before retrying
+                  setTimeout(() => initWA(), 5000);
               } else {
-                 console.log("WA Logged out");
+                 console.log("WA Logged out correctly");
                  globalThis.globalWAStatus.qr = null;
-                 globalThis.globalWAStatus.isInitializing = false;
                  if (fs.existsSync(AUTH_DIR)) {
                      fs.rmSync(AUTH_DIR, { recursive: true, force: true });
                  }
@@ -112,16 +120,24 @@ export const initWA = async (wait: boolean = false) => {
               globalThis.globalWAStatus.isConnected = true;
               globalThis.globalWAStatus.qr = null;
               globalThis.globalWAStatus.isInitializing = false;
+              globalThis.globalWAStatus.error = null;
               safeResolve();
           }
       });
 
-      // Timeout for initial connection setup
-      setTimeout(safeResolve, 15000);
+      // Killswitch for initialization if it takes too long without any update
+      setTimeout(() => {
+        if (!resolved) {
+            console.log("Initialization timeout reached");
+            globalThis.globalWAStatus.isInitializing = false;
+            safeResolve();
+        }
+      }, 30000);
 
     } catch (error) {
-      console.error("Gagal inisialisasi WA:", error);
+      console.error("Critical initialization error:", error);
       globalThis.globalWAStatus.isInitializing = false;
+      globalThis.globalWAStatus.error = "Failed to start client";
       safeResolve();
     }
   });

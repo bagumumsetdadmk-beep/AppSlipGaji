@@ -10,7 +10,7 @@ interface WAConfigDialogProps {
 }
 
 export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
-  const [status, setStatus] = useState<{ isConnected: boolean; qr: string | null }>({
+  const [status, setStatus] = useState<{ isConnected: boolean; qr: string | null; isInitializing?: boolean; error?: string | null }>({
     isConnected: false,
     qr: null,
   })
@@ -19,6 +19,7 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
   const fetchStatus = async () => {
     try {
       const res = await fetch("/api/wa")
+      if (!res.ok) throw new Error("Server error");
       const data = await res.json()
       setStatus(data)
     } catch (error) {
@@ -27,10 +28,13 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
   }
 
   const connectWA = async () => {
+    if (loading || status.isInitializing) return;
     setLoading(true)
     try {
-      await fetch("/api/wa", { method: "POST" })
-      await fetchStatus()
+      const res = await fetch("/api/wa", { method: "POST" })
+      if (!res.ok) throw new Error("Gagal memulai koneksi");
+      const data = await res.json()
+      setStatus(data)
     } catch (error) {
       console.error("Gagal inisialisasi WA:", error)
     } finally {
@@ -38,13 +42,13 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
     }
   }
 
-  const logoutWA = async () => {
+  const resetWA = async () => {
     setLoading(true)
     try {
       await fetch("/api/wa", { method: "DELETE" })
       await fetchStatus()
     } catch (error) {
-      console.error("Gagal logout WA:", error)
+      console.error("Gagal reset WA:", error)
     } finally {
       setLoading(false)
     }
@@ -52,7 +56,6 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
 
   useEffect(() => {
     if (open) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       fetchStatus()
       const interval = setInterval(fetchStatus, 3000)
       return () => clearInterval(interval)
@@ -76,10 +79,16 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
           </div>
           <p className="text-sm text-slate-500 mb-6">
             Hubungkan WhatsApp untuk mengirim slip gaji langsung ke pegawai tanpa membuka tab baru.<br /><br />
-            <strong>Peringatan!</strong> Menyiapkan QR code bisa memakan waktu, mohon bersabar.
+            <strong>Peringatan!</strong> Mohon bersabar saat menyiapkan QR code. Gunakan browser yang stabil.
           </p>
 
         <div className="flex flex-col items-center justify-center py-6">
+          {status.error && (
+            <div className="mb-4 p-3 bg-red-50 text-red-600 text-sm rounded-xl border border-red-100 w-full text-center">
+              {status.error}
+            </div>
+          )}
+
           {status.isConnected ? (
             <div className="flex flex-col items-center space-y-4 text-center">
               <div className="h-16 w-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center">
@@ -91,25 +100,30 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
                   Aplikasi siap digunakan untuk mengirim pesan slip gaji
                 </p>
               </div>
-              <button onClick={logoutWA} disabled={loading} className="mt-4 px-4 py-2 border border-slate-200 rounded-xl text-red-600 hover:text-red-700 hover:bg-red-50 text-sm font-semibold transition-colors flex items-center">
+              <button onClick={resetWA} disabled={loading} className="mt-4 px-4 py-2 border border-slate-200 rounded-xl text-red-600 hover:text-red-700 hover:bg-red-50 text-sm font-semibold transition-colors flex items-center">
                 {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <LogOut className="h-4 w-4 mr-2" />}
                 Putuskan Koneksi
               </button>
             </div>
           ) : status.qr ? (
             <div className="flex flex-col items-center space-y-4 text-center">
-              <div className="p-2 border rounded-xl bg-white shadow-sm">
+              <div className="p-2 border rounded-xl bg-white shadow-sm overflow-hidden">
                 <QRCode value={status.qr} size={224} />
               </div>
               <p className="text-sm text-slate-500 max-w-xs">
                 Buka WhatsApp di HP Anda, buka menu Perangkat Taut, dan scan QR Code ini.
               </p>
-              <button onClick={connectWA} disabled={loading || (status as any).isInitializing} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors flex items-center">
-                 {loading || (status as any).isInitializing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
-                 Muat Ulang QR
-              </button>
+              <div className="flex gap-2">
+                <button onClick={connectWA} disabled={loading || status.isInitializing} className="px-4 py-2 border border-slate-200 rounded-xl text-slate-700 hover:bg-slate-50 text-sm font-semibold transition-colors flex items-center">
+                   {loading || status.isInitializing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
+                   Muat Ulang QR
+                </button>
+                <button onClick={resetWA} disabled={loading} className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl hover:bg-slate-200 text-sm font-semibold transition-colors">
+                   Reset
+                </button>
+              </div>
             </div>
-          ) : (status as any).isInitializing ? (
+          ) : status.isInitializing ? (
             <div className="flex flex-col items-center space-y-4 text-center">
               <div className="h-16 w-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center animate-pulse">
                 <Loader2 className="h-8 w-8 animate-spin" />
@@ -120,6 +134,9 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
                   Sistem sedang menginisialisasi modul WhatsApp. Mohon tunggu sebentar.
                 </p>
               </div>
+              <button onClick={resetWA} disabled={loading} className="mt-2 text-xs text-slate-400 hover:text-slate-600 underline">
+                Batal & Reset
+              </button>
             </div>
           ) : (
             <div className="flex flex-col items-center space-y-4 text-center">
@@ -132,15 +149,19 @@ export function WAConfigDialog({ open, onOpenChange }: WAConfigDialogProps) {
                   Klik tombol di bawah untuk menampilkan QR Code
                 </p>
               </div>
-              <button onClick={connectWA} disabled={loading || (status as any).isInitializing} className="mt-4 px-4 py-2 bg-slate-900 text-white rounded-xl hover:bg-slate-800 text-sm font-semibold transition-colors flex items-center">
-                {loading || (status as any).isInitializing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
+              <button 
+                onClick={connectWA} 
+                disabled={loading || status.isInitializing} 
+                className="mt-4 px-6 py-3 bg-slate-900 text-white rounded-xl hover:bg-slate-800 text-sm font-bold shadow-lg shadow-slate-200 transition-all active:scale-95 flex items-center disabled:opacity-50"
+              >
+                {loading || status.isInitializing ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <QrCode className="h-4 w-4 mr-2" />}
                 Tampilkan QR Code
               </button>
             </div>
           )}
         </div>
-        </div>
       </div>
     </div>
-  )
+  </div>
+)
 }
